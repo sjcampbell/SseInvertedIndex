@@ -177,6 +177,16 @@
 	  <artifactId>mockito-all</artifactId>
 	  <version>1.9.5</version>
 	</dependency>
+	<dependency>
+	  <groupId>org.bouncycastle</groupId>
+	  <artifactId>bcprov-jdk15on</artifactId>
+      <version>1.54</version>
+	</dependency>
+	<dependency>
+	  <groupId>org.scalatest</groupId>
+	  <artifactId>scalatest_2.10</artifactId>
+	  <version>3.0.0-M15</version>
+	</dependency>
   </dependencies>
 
 </project>

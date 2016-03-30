@@ -23,6 +23,14 @@ object BuildInvertedIndex extends Tokenizer{
         }
 	}
     
+    class WordPartitioner(numParts: Int) extends Partitioner {
+		def numPartitions: Int = numParts
+		def getPartition(key: Any): Int = {
+		    val encWordPair = key.asInstanceOf[ByteArrayStringPair]
+			(encWordPair.word.hashCode() & Int.MaxValue) % numParts
+        }
+	}
+    
     def main(argv: Array[String]) {
         val args = new Conf(argv)
         
@@ -42,12 +50,10 @@ object BuildInvertedIndex extends Tokenizer{
         val hadoopConfig = new NewHadoopJob().getConfiguration
         val data = sc.newAPIHadoopFile (inputFile, classOf[TextInputFormat], classOf[LongWritable], classOf[Text], hadoopConfig)
 
-        def encryptTerm(term: String, docCount: Int) : String = {
-            val plainText = term + docCount.toString()
-            
-            // TODO: find cryptographic hash function for this.
-            
-            return plainText;
+        // Use Pseudo-random function to create encrypted labels for each word.
+        def encryptWord(word: String, wordKey: Array[Byte], docCount: Int) : Array[Byte] = {
+            val plainText = word + docCount.toString()
+            IndexEncryptor.KeyedCryptoHash(plainText, wordKey, docCount)
         }
         
         
@@ -90,40 +96,47 @@ object BuildInvertedIndex extends Tokenizer{
         }
         
         // Get keys all together and loop through, one key at a time, outputting a compressed document postings list for each.
-        .repartitionAndSortWithinPartitions(new HashPartitioner(args.reducers()))
-
+        val encryptedWordDocIds = termDocIds.repartitionAndSortWithinPartitions(new HashPartitioner(args.reducers()))
+        
         // Replace search words with encrypted versions of the word
         .mapPartitions { 
             case (iter) => {
-                var currentTerm = ""
+                var currentWord = ""
                 var currentIndex = 0
+                var wordKey = Array[Byte]()
                 
                 iter.map {
-                    case (term, docId) => {
-                        if (term != currentTerm) {
+                    case (word, docId) => {
+                        if (word != currentWord) {
                             // Reset term and index
                             currentIndex = 0
-                            currentTerm = term
+                            currentWord = word
+                            wordKey = IndexEncryptor.GenerateWordKey(word)
                         }
 
                         // Generate encrypted term
-                        val encryptedTerm = encryptTerm(term, currentIndex)
+                        val encryptedLabel = encryptWord(word, wordKey, currentIndex)
                         currentIndex = currentIndex + 1
-                        (encryptedTerm, docId)                           
+                        
+                        // Output plainText along with encrypted label in order to deal with collisions in encrypted labels
+                        // Output key must be sortable in order to use Spark's sorting/shuffle machinery.
+                        (new ByteArrayStringPair(encryptedLabel, word), docId)
                     }
                 }
             }
         }
         // Outputs RDD[String, LongWritable]
-
-        // Deal with duplicate encrypted terms (cryptographic hash collisions)
-        /*.reduceByKey {
-            case (docId1: LongWritable, docId2: LongWritable) => {
-                docId1 + docId2
-            }
-        }*/
         
-        // Once encrypted, sort again, but by encrypted term to gain history independence of the index.
+        // There may be collisions in the encrypted labels
+        // Deal with duplicate encrypted terms (cryptographic hash collisions)
+        .repartitionAndSortWithinPartitions(new WordPartitioner(args.reducers()))
+        
+        // TODO NEXT:Now that we have encrypted words and their unencrypted counterparts, find out what kind of collisions
+        // we've built up.
+               
+        
+        // Once all is done, ensure index is stored with history independence. This might mean another random sort. 
+        // Sorting only within partitions should probably add enough chaos to the order.
         //.repartitionAndSortWithinPartitions(new HashPartitioner(args.reducers()))
     }
 }
