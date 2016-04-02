@@ -4,18 +4,13 @@ import org.bouncycastle.jcajce.provider.digest.SHA3
 
 object IndexEncryptor {
     
-    def CryptoHashWord(word: String) : Array[Byte] = {
-        val md = new SHA3.DigestSHA3(224)
-        md.update(word.getBytes())
-        md.digest()
-    }
-    
-    def KeyedCryptoHash(word: String, key : Array[Byte], count : Int) : Array[Byte] = {
+    def EncryptWord(word: String, wordKey: Array[Byte], docCount: Int) : Array[Byte] = {
+        val plainText = word + docCount.toString()
         
         // TODO: Use key in this crypto hash somehow... Maybe XOR with input, or 
         
         val md = new SHA3.DigestSHA3(224)
-        md.update(word.getBytes())
+        md.update(plainText.getBytes())
         md.digest()
     }
     
