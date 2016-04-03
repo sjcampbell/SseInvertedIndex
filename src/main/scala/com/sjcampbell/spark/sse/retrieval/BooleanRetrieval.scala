@@ -52,7 +52,7 @@ class BooleanRetriever(indexPath: String, dataPath: String, fs: FileSystem) {
    
     
     def executeQuery(query: String) = {
-        val words = query.split("\\s+");
+        val words = query.toLowerCase().split("\\s+");
 
         println("Query words: " + words.mkString(" "))
         
@@ -72,6 +72,9 @@ class BooleanRetriever(indexPath: String, dataPath: String, fs: FileSystem) {
         val set = postings.pop()
         
         println("Postings list set size: " + set.size)
+        println("")
+        println("** Results for query: " + query + " **")
+        println("")
         
         val iter = set.iterator
         while(iter.hasNext) {
@@ -108,34 +111,49 @@ class BooleanRetriever(indexPath: String, dataPath: String, fs: FileSystem) {
         var postings = new HashSet[Long]()
         
         val key = new Text();
-        val wordKey = IndexEncryptor.GenerateWordKey(word)
-        val labelBytes = IndexEncryptor.EncryptWord(word, wordKey, 0)
-        key.set(labelBytes)
+        var wordKey = Array[Byte]()
+        var labelBytes = Array[Byte]()
 
         println("Searching map files for key " + word)
         var i = 0
+        var searchCount = 0
 	    var docId = new LongWritable()
-	    for (reader: MapFile.Reader <- indexReaders) {
-	        
-	        println("Searching map file " + i)
-	        i += 1
-	        
-	    	val result = reader.get(key, docId);
-	    	if (result != null) {
-	    	    
-	    	    println("docId is found: " + docId)
-	    	    println("docId value found: " + docId.get())
-	    	    
-	    		val docIdLong = docId.get()
-	    	    if (docIdLong > 0) {
-	    	        println("Found docID: " + docIdLong)
-	    	        postings = postings += docIdLong
-    	            return postings
-	    	    }
-	    	}
-	    }
+        var continueSearching = true
+        
+        while(continueSearching) {
+            continueSearching = false
+            
+            wordKey = IndexEncryptor.GenerateWordKey(word)
+            labelBytes = IndexEncryptor.EncryptWord(word, wordKey, searchCount)
+            key.set(labelBytes)
+            
+            for (reader: MapFile.Reader <- indexReaders) {
+                println("Searching map file " + i)
+    	        i += 1
+    	        
+    	    	val result = reader.get(key, docId);
+    	    	if (result != null) {
+    	    	    
+    	    	    println("docId is found: " + docId)
+    	    	    println("docId value found: " + docId.get())
+    	    	    
+    	    		val docIdLong = docId.get()
+    	    	    if (docIdLong > 0) {
+    	    	        println("Found docID: " + docIdLong)
+    	    	        postings = postings += docIdLong
+        	         
+    	    	        // We've found a document ID for this label, so increment count and search next. 
+    	    	        continueSearching = true
+    	    	        searchCount += 1
+    	    	    }
+    	    	}
+    	    }    
+        }
 
-        println("No postings found for search word.")
+        if (postings.size == 0) {
+            println("No postings found for search word: " + word)
+        }
+        
         postings
     }
     
