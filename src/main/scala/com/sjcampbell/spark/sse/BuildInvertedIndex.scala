@@ -113,7 +113,7 @@ object BuildInvertedIndex extends Tokenizer{
 
                         // Generate encrypted label
                         val encryptedLabel = IndexEncryptor.EncryptWord(word, wordKey, currentIndex)
-                        currentIndex = currentIndex + 1
+                        currentIndex += 1
                         
                         // Output plainText along with encrypted label in order to deal with collisions in encrypted labels
                         // Output key must be sortable in order to use Spark's sorting/shuffle machinery.
