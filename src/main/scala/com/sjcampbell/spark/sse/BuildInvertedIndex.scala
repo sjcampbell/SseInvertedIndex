@@ -14,14 +14,6 @@ import org.apache.spark.Partitioner
 object BuildInvertedIndex extends Tokenizer{
     val log = Logger.getLogger(getClass().getName())
     
-    // Partition based on term 
-	class HashPartitioner(numParts: Int) extends Partitioner {
-		def numPartitions: Int = numParts
-		def getPartition(key: Any): Int = {
-			(key.hashCode() & Int.MaxValue) % numParts
-        }
-	}
-    
     class WordPartitioner(numParts: Int) extends Partitioner {
 		def numPartitions: Int = numParts
 		def getPartition(key: Any): Int = {
@@ -29,6 +21,10 @@ object BuildInvertedIndex extends Tokenizer{
 			(encWordPair.word.hashCode() & Int.MaxValue) % numParts
         }
 	}
+
+    implicit val textOrdering = new Ordering[Text] {
+        override def compare(a: Text, b: Text) = a.compareTo(b.getBytes, 0, b.getLength)
+    }
     
     def main(argv: Array[String]) {
         val args = new Conf(argv)
@@ -39,7 +35,6 @@ object BuildInvertedIndex extends Tokenizer{
         
         val conf = new SparkConf().setAppName("Build Encrypted Inverted Index")
         conf.set("spark.serializer", "org.apache.spark.serializer.KryoSerializer")
-        //conf.registerKryoClasses(Array(classOf[BuildInvertedIndexTransformations]))
 
         val sc = new SparkContext(conf)
         sc.setJobDescription("Building and encrypted inverted index using a secure searchable encryption scheme.")
@@ -47,49 +42,20 @@ object BuildInvertedIndex extends Tokenizer{
         val outputDir = new Path(args.output())
         FileSystem.get(sc.hadoopConfiguration).delete(outputDir, true)
         
-        implicit val textOrdering = new Ordering[Text] {
-            override def compare(a: Text, b: Text) = a.compareTo(b.getBytes, 0, b.getLength)
-        }
-        
-        /* Getting term/docID alternative: 
-         * Map, then reduce into [term, List<DocID>], then cycle through those, writing each pair.
-         * This may lessen the number of pairs that have to be shuffled.
-         */
-
-        /* Encryption
-         * ==========
-         * 
-         * Option 1 (Try this first)
-         * Deal with collisions using bucket hash. Store multiple docIDs with encrypted term,
-         * then when fetching, try to decrypt all of them and match the first number to the docId sequence
-         * number. If it's a match, then use it. Otherwise don't. 
-         * The only problem with this is that some of the encrypted keys will have a slightly larger encrypted 
-         * postings list, rather than single key/pair postings.
-         * 
-         * Option 2 
-         * Encrypt all terms with a large-enough crypto hash that the odds of collisions will be negligible. This probably is not feasible.
-         * 
-         * Option 3
-         * Attempt cuckoo hash? 
-         */
-
-        // Get RDD in hadoop file so we have line offsets to use as document IDs
+        // Create the RDD based on a Hadoop file so each line offset is a document ID and each line is the document content.
         val inputFile = args.input()
         val hadoopConfig = new NewHadoopJob().getConfiguration
         val data = sc.newAPIHadoopFile (inputFile, classOf[TextInputFormat], classOf[LongWritable], classOf[Text], hadoopConfig)
-        
-        val termDocIds = data.flatMap(BuildInvertedIndexTransformations.parseWordDocIdPairs)
-        
-        // Group like words together then loop through, one key at a time, outputting document IDs with encrypted labels.
-        val sortedWordDocIds = termDocIds.repartitionAndSortWithinPartitions(new HashPartitioner(args.reducers()))
-        
-        // Replace search words with encrypted versions of the word
-        val encryptedWordDocIds = sortedWordDocIds.mapPartitions(BuildInvertedIndexTransformations.encryptWords)
 
+        // Start building the index
+        val termDocIds = data.flatMap(BuildInvertedIndexTransformations.parseWordDocIdPairList)
+        val groupedDocIds = termDocIds.reduceByKey(BuildInvertedIndexTransformations.reducePostingsLists)
+        val encryptedWords = groupedDocIds.flatMap(BuildInvertedIndexTransformations.encryptWords)
+        
         // There may be collisions in the hashed labels
         // Deal with duplicate hashed labels (cryptographic hash collisions) - sort by label (hash) and find them.
         var collisionCount = sc.accumulator(0)
-        val collisions = encryptedWordDocIds.repartitionAndSortWithinPartitions(new WordPartitioner(args.reducers()))    
+        val collisions = encryptedWords.repartitionAndSortWithinPartitions(new WordPartitioner(args.reducers()))    
         .mapPartitions { 
             case (iter) => {
                 val TEXT = new Text()
@@ -114,69 +80,51 @@ object BuildInvertedIndex extends Tokenizer{
                 }
             }
         }
+        // Sort to ensure history independence, as security property of the encrypted index algorithm.
         .sortByKey()
         .saveAsNewAPIHadoopFile(args.output(), classOf[Text], classOf[LongWritable], classOf[MapFileOutputFormat])
-        
-        // TODO: Once all is done, ensure index is stored with history independence. This might mean another random sort. 
-        // Sorting only within partitions should probably add enough chaos to the order.
-        //.repartitionAndSortWithinPartitions(new HashPartitioner(args.reducers()))
     }
 }
 
 object BuildInvertedIndexTransformations extends Tokenizer {
-    // Partition based on term 
-	class HashPartitioner(numParts: Int) extends Partitioner {
-		def numPartitions: Int = numParts
-		def getPartition(key: Any): Int = {
-			(key.hashCode() & Int.MaxValue) % numParts
-        }
-	}
-    
-    class WordPartitioner(numParts: Int) extends Partitioner {
-		def numPartitions: Int = numParts
-		def getPartition(key: Any): Int = {
-		    val encWordPair = key.asInstanceOf[ByteArrayStringPair]
-			(encWordPair.word.hashCode() & Int.MaxValue) % numParts
-        }
-	}
     
     implicit val textOrdering = new Ordering[Text] {
         override def compare(a: Text, b: Text) = a.compareTo(b.getBytes, 0, b.getLength)
     }
     
-    def parseWordDocIdPairs(pair: (LongWritable, Text)) : TraversableOnce[(String, LongWritable)] = {
-        val line = pair._2
-        val docId = pair._1
-        val tokens = tokenize(line.toString())
+    def parseWordDocIdPairList(pair: (LongWritable, Text)) : TraversableOnce[(String, List[LongWritable])] = {
+        // document ID:  pair._1
+        // line:         pair._2
+        val tokens = tokenize(pair._2.toString())
         tokens.distinct.map(word => 
             { 
                 // Get pairs of (word, docID)
-                (word, docId)
+                // Note: Without a deep copy here, the resulting postings lists all have the same
+                // value, as if the pair object reference does not change between flatmap iterations.
+                val docId = new LongWritable(pair._1.get()) 
+                (word, List(docId))
             })
     }
     
-    def encryptWords(iter: Iterator[(String, LongWritable)]) : Iterator[(ByteArrayStringPair, LongWritable)] = {
-        var currentWord = ""
-        var currentIndex = 0
-        var wordKey = Array[Byte]()
+    def reducePostingsLists(postings1: List[LongWritable], postings2: List[LongWritable]): List[LongWritable] = {
+        postings1 ++ postings2
+    }
+    
+    def encryptWords(wordDocPostings: (String, List[LongWritable])) : Iterable[(ByteArrayStringPair, LongWritable)] = {
+        var encryptedPostings = List[(ByteArrayStringPair, LongWritable)]()
+        var wordKey = IndexEncryptor.GenerateWordKey(wordDocPostings._1)
         
-        iter.map {
-            case (word, docId) => {
-                if (word != currentWord) {
-                    // Reset word and index
-                    currentIndex = 0
-                    currentWord = word
-                    wordKey = IndexEncryptor.GenerateWordKey(word)
-                }
+        val i = 0
+        for(i <- 0 to (wordDocPostings._2.length - 1)) {
 
-                // Generate encrypted label
-                val encryptedLabel = IndexEncryptor.EncryptWord(word, wordKey, currentIndex)
-                currentIndex += 1
-                
-                // Output plainText along with encrypted label in order to deal with collisions in encrypted labels
-                // Output key must be sortable in order to use Spark's sorting/shuffle machinery.
-                (new ByteArrayStringPair(encryptedLabel, word), docId)
-            }
+            // Generate encrypted label
+            val encryptedLabel = IndexEncryptor.EncryptWord(wordDocPostings._1, wordKey, i)
+            
+            // Output plainText along with encrypted label in order to deal with collisions in encrypted labels
+            // Output key must be sortable in order to use Spark's sorting/shuffle machinery.
+            encryptedPostings = (new ByteArrayStringPair(encryptedLabel, wordDocPostings._1), wordDocPostings._2(i)) +: encryptedPostings                
         }
+        
+        encryptedPostings
     }
 }
