@@ -14,8 +14,8 @@ import org.apache.hadoop.fs.PathFilter
 import org.apache.hadoop.io.MapFile
 import org.apache.hadoop.io.Text
 import org.apache.hadoop.io.LongWritable
-
 import com.sjcampbell.spark.sse.IndexEncryptor
+import tl.lin.data.array.LongArrayWritable
 
 object BooleanRetrieval {
     def main(argv: Array[String]) {
@@ -29,6 +29,9 @@ object BooleanRetrieval {
 }
 
 class BooleanRetriever(indexPath: String, dataPath: String, fs: FileSystem) {
+    
+    val docGroupSize = 4
+    
     val postings = new Stack[HashSet[Long]]()
     var indexReaders = List[MapFile.Reader]()
     val collection = fs.open(new Path(dataPath));
@@ -115,9 +118,7 @@ class BooleanRetriever(indexPath: String, dataPath: String, fs: FileSystem) {
         var labelBytes = Array[Byte]()
 
         println("Searching map files for key " + word)
-        var i = 0
         var searchCount = 0
-	    var docId = new LongWritable()
         var continueSearching = true
         
         while(continueSearching) {
@@ -126,28 +127,37 @@ class BooleanRetriever(indexPath: String, dataPath: String, fs: FileSystem) {
             wordKey = IndexEncryptor.GenerateWordKey(word)
             labelBytes = IndexEncryptor.EncryptWord(word, wordKey, searchCount)
             key.set(labelBytes)
-            
-            for (reader: MapFile.Reader <- indexReaders) {
+
+            var docIdArray = new LongArrayWritable()            
+
+            var i = 0
+            // Loop through map files to search for key. 
+            // TODO: There's probably a more efficient way to do this since values should be separated
+            // between MapFile partitions by an ordered key.
+            while(i < indexReaders.length) {
                 println("Searching map file " + i)
-    	        i += 1
     	        
-    	    	val result = reader.get(key, docId);
-    	    	if (result != null) {
+    	    	val result = indexReaders(i).get(key, docIdArray);
+    	    	if (docIdArray.size() > 0) {
     	    	    
-    	    	    println("docId is found: " + docId)
-    	    	    println("docId value found: " + docId.get())
-    	    	    
-    	    		val docIdLong = docId.get()
-    	    	    if (docIdLong > 0) {
-    	    	        println("Found docID: " + docIdLong)
-    	    	        postings = postings += docIdLong
-        	         
-    	    	        // We've found a document ID for this label, so increment count and search next. 
-    	    	        continueSearching = true
-    	    	        searchCount += 1
+    	    	    println("docIdArray is found. Size: " + docIdArray.size())
+    	    	    for (k <- 0 to docIdArray.size() - 1) {
+    	    	        println("DocId value found: " + docIdArray.get(k))
+    	    	        postings = postings += docIdArray.get(k)
     	    	    }
+    	    	    
+    	    	    // We've found a document ID for this label, so increment count and search next.
+        	        if (docIdArray.size() >= docGroupSize) {
+        	            continueSearching = true
+        	            searchCount += 1
+        	        }
+        	        
+        	        // Since we've found the word we were searching for, break this god-forsaken MapFile search loop
+        	        i += indexReaders.length
     	    	}
-    	    }    
+    	    	
+    	    	i += 1
+    	    }
         }
 
         if (postings.size == 0) {

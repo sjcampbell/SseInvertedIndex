@@ -23,6 +23,35 @@ class BuildInvertedIndexTest extends FunSuite {
         assert(result2 == 0)
     }
 
+    test("encryptWords should return document IDs split up by document group size") {
+        BuildInvertedIndexTransformations.documentGroupSize = 4
+        val docIds = List(new LongWritable(1L), new LongWritable(2L), new LongWritable(3L), new LongWritable(4L), 
+                new LongWritable(5L), new LongWritable(6L), new LongWritable(7L), new LongWritable(8L))
+        val wordDocIds = ("test", docIds)
+        
+        println("Encrypting words")
+        val result = BuildInvertedIndexTransformations.encryptWords(wordDocIds)
+        
+        assert(result.size == 2)
+    }
+    
+    test("encryptWords should group document IDs into groups of a maximum size until the last group") {
+        val testGroupSize = 4
+        BuildInvertedIndexTransformations.documentGroupSize = testGroupSize
+        val docIds = List(new LongWritable(1L), new LongWritable(2L), new LongWritable(3L), new LongWritable(4L), 
+                new LongWritable(5L), new LongWritable(6L))
+        val wordDocIds = ("test", docIds)
+        
+        val result = BuildInvertedIndexTransformations.encryptWords(wordDocIds)
+        
+        assert(result.size == 2)
+
+        // The first iterator element is the last group prepended by the index builder, so it's the one with fewer elements.
+        assert(result(0)._2.size() == 2)
+        assert(result(1)._2.size() == testGroupSize)
+        result.iterator
+    }
+    
     
     /* This test shows that the token parser doesn't parse out words that are separated by only a comma with no spaces
     test("Tokenize") {
