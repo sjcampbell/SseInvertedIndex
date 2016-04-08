@@ -9,14 +9,26 @@ import javax.crypto.spec.SecretKeySpec
 
 object IndexEncryptor {
     val charSet = Charset.forName("US-ASCII");
-    val sha256_HMAC = Mac.getInstance("HmacSHA256");
     
     def EncryptWord(word: String, wordKey: Array[Byte], docCount: Int) : Array[Byte] = {
+
+        val sha256_HMAC = Mac.getInstance("HmacSHA256");
         val plainText = word + docCount.toString()
-        val secretKey = new SecretKeySpec(wordKey, 0, wordKey.length, "HmacSHA256")
         
-        sha256_HMAC.init(secretKey)
-        sha256_HMAC.doFinal(plainText.getBytes())
+        try
+        {
+            val secretKey = new SecretKeySpec(wordKey, 0, wordKey.length, "HmacSHA256")
+
+            sha256_HMAC.init(secretKey)
+            sha256_HMAC.doFinal(plainText.getBytes())
+        }
+        catch{
+            case ex: Throwable => {
+                println("!! Exception occurred while trying to encrypt word.")
+                println("!! plaintext: " + plainText)
+                throw ex
+            }
+        }
 
         /* SHA-256, non-HMAC
         val md2 = MessageDigest.getInstance("SHA-256")

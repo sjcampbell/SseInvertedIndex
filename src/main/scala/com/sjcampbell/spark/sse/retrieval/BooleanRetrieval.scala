@@ -87,7 +87,8 @@ class BooleanRetriever(indexPath: String, dataPath: String, fs: FileSystem) {
         	
         	if (docId > 0) {
         	    val line = fetchLine(docId);
-        	    System.out.println(docId + "\t" + line);
+        	    val subLine = if (line.length > 80) line.substring(0, 80) + "..." else line;
+        	    System.out.println(docId + "\t" + subLine);
         	}
         }
     }

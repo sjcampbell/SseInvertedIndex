@@ -60,7 +60,7 @@ object BuildInvertedIndex extends Tokenizer{
         // Deal with duplicate hashed labels (cryptographic hash collisions) 
         // sort by label (hash) and find them.
         var collisionCount = sc.accumulator(0)
-        val collisions = encryptedWords.repartitionAndSortWithinPartitions(new WordPartitioner(args.reducers()))    
+        val collisions = encryptedWords.repartitionAndSortWithinPartitions(new WordPartitioner(args.reducers()))
         .mapPartitions { 
             case (iter) => {
                 val TEXT = new Text()
@@ -128,9 +128,11 @@ object BuildInvertedIndexTransformations extends Tokenizer {
             val encryptedLabel = IndexEncryptor.EncryptWord(wordDocPostings._1, wordKey, i/documentGroupSize)
             val groupSize = Math.min(documentGroupSize, (wordDocPostings._2.length - i))
             
-            val ar = new Array[Long](groupSize)
-            for (j <- 0 to (groupSize - 1)) {
-                ar(j) = wordDocPostings._2(i + j).get()
+            // Initialize array to full document group size so when it's encrypted, you can't tell if it is one document ID or more.
+            val ar = new Array[Long](documentGroupSize)
+            for (j <- 0 to (documentGroupSize - 1)) {
+                if (j > groupSize - 1) ar(j) = -1
+                else ar(j) = wordDocPostings._2(i + j).get()
             }
             
             val docArray = new LongArrayWritable(ar)
