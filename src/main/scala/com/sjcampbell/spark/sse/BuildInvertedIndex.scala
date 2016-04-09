@@ -42,8 +42,10 @@ object BuildInvertedIndex extends Tokenizer{
         val sc = new SparkContext(conf)
         sc.setJobDescription("Building and encrypted inverted index using a secure searchable encryption scheme.")
         
+        log.info("! Deleting output file before running the job: " + args.output())
         val outputDir = new Path(args.output())
         FileSystem.get(sc.hadoopConfiguration).delete(outputDir, true)
+        log.info("! Output file deleted.")
         
         // Create the RDD based on a Hadoop file so each line offset is a document ID and each line is the document content.
         val inputFile = args.input()
@@ -51,6 +53,7 @@ object BuildInvertedIndex extends Tokenizer{
         val data = sc.newAPIHadoopFile (inputFile, classOf[TextInputFormat], classOf[LongWritable], classOf[Text], hadoopConfig)
 
         // Start building the index
+        log.info("! Commencing encrypted index build...")
         val docGroupSize = args.docGroupSize()
         val termDocIds = data.flatMap(BuildInvertedIndexTransformations.parseWordDocIdPairList)
         val groupedDocIds = termDocIds.reduceByKey(BuildInvertedIndexTransformations.reducePostingsLists)
@@ -88,6 +91,10 @@ object BuildInvertedIndex extends Tokenizer{
         // Sort to ensure history independence - a security property of the encrypted index algorithm.
         .sortByKey()
         .saveAsNewAPIHadoopFile(args.output(), classOf[Text], classOf[LongArrayWritable], classOf[MapFileOutputFormat])
+        
+        log.info("Collisions found in index: " + collisionCount.value)
+        
+        log.info("! Index building: complete.")
     }
 }
 

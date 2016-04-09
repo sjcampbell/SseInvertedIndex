@@ -7,6 +7,7 @@ import java.io.BufferedReader;
 import java.util.Set
 import java.util.Stack
 
+import org.apache.hadoop.conf.Configured
 import org.apache.hadoop.conf.Configuration
 import org.apache.hadoop.fs.FileSystem
 import org.apache.hadoop.fs.Path
@@ -29,20 +30,17 @@ object BooleanRetrieval {
 }
 
 class BooleanRetriever(indexPath: String, dataPath: String, fs: FileSystem) {
-    
-    val docGroupSize = 4
-    
+    val docGroupSize = 1
     val postings = new Stack[HashSet[Long]]()
     var indexReaders = List[MapFile.Reader]()
+    
+    println("Opening data file from path: " + dataPath)
     val collection = fs.open(new Path(dataPath));
     
     // Initialize map file readers
-    val dirPath = new java.io.File(indexPath)
-    if (!dirPath.exists()) {
-        throw new Exception("Index directory was not found.")
-    }
-
+    println("Initializing map file readers from: " + indexPath)
     val fileList = fs.listStatus(new Path(indexPath), new PartPathFilter())
+    println("Found " + fileList.size + " index part files")
     fileList.foreach { 
         case (file) => {
             indexReaders = indexReaders :+ new MapFile.Reader(file.getPath(), fs.getConf())
@@ -83,9 +81,8 @@ class BooleanRetriever(indexPath: String, dataPath: String, fs: FileSystem) {
         while(iter.hasNext) {
         	val docId = iter.next();
         	
-        	println("Retrieving doc ID: " + docId)
-        	
         	if (docId > 0) {
+        	    println("Retrieving doc ID: " + docId)
         	    val line = fetchLine(docId);
         	    val subLine = if (line.length > 80) line.substring(0, 80) + "..." else line;
         	    System.out.println(docId + "\t" + subLine);
@@ -133,8 +130,8 @@ class BooleanRetriever(indexPath: String, dataPath: String, fs: FileSystem) {
 
             var i = 0
             // Loop through map files to search for key. 
-            // TODO: There's probably a more efficient way to do this since values should be separated
-            // between MapFile partitions by an ordered key.
+            // TODO: There's probably a more efficient way to do this since values 
+            // should be partitioned in the index.
             while(i < indexReaders.length) {
                 println("Searching map file " + i)
     	        
