@@ -29,7 +29,6 @@ public class BooleanRetrievalJava extends Configured implements Tool {
 	private MapFile.Reader[] indexReaders;
 	private FSDataInputStream collection;
 	private Stack<ArrayList<Long>> postingsStack;
-	private int docGroupSize = 1;
 	
 	private BooleanRetrievalJava() {}
 
@@ -80,17 +79,6 @@ public class BooleanRetrievalJava extends Configured implements Tool {
         	    System.out.println(docId + "\t" + subLine);
         	}
 		}
-		
-        /*while(postings.iterator().hasNext()) {
-        	Long docId = postings.iterator().next();
-        	
-        	if (docId > 0) {
-        		System.out.println("Retrieving doc ID: " + docId);
-        	    String line = fetchLine(docId);
-        	    String subLine = line.length() > 80 ? line.substring(0, 80) + "..." : line;
-        	    System.out.println(docId + "\t" + subLine);
-        	}
-        }*/
 	}
 
 	private void pushTermPostings(String term) throws IOException {
@@ -111,7 +99,7 @@ public class BooleanRetrievalJava extends Configured implements Tool {
 		int searchCount = 0;
 		boolean continueSearching = true;
 		
-		System.out.print("Searching map files for key: " + term);
+		System.out.println("Searching map files for key: " + term);
 		while (continueSearching) {
 			continueSearching = false;
 			
@@ -121,8 +109,9 @@ public class BooleanRetrievalJava extends Configured implements Tool {
 		    
 		    LongArrayWritable docIdArray = new LongArrayWritable();            
 
+		    boolean postingsListEnd = false;
             int i = 0;
-            // Loop through map files to search for key. 
+            // Loop through map files to search for key.
             // TODO: There's probably a more efficient way to do this since values 
             // should be partitioned in the index.
             while(i < indexReaders.length) {
@@ -135,15 +124,22 @@ public class BooleanRetrievalJava extends Configured implements Tool {
     	    	    for (int k = 0; k < docIdArray.size(); k++) {
     	    	    	System.out.println("DocId value found: " + docIdArray.get(k));
     	    	        postings.add(docIdArray.get(k));
+
+    	    	        // -1's are used as filler in the index to make document lists a specific size.
+    	    	        // If any are found, it means there are no more document IDs
+    	    	        if (docIdArray.get(k) < 0) {
+    	    	        	postingsListEnd = true;
+    	    	        }
     	    	    }
     	    	    
     	    	    // We've found a document ID for this label, so increment count and search next.
-        	        if (docIdArray.size() >= docGroupSize) {
+        	        if (!postingsListEnd) {
+        	        	searchCount += 1;
         	            continueSearching = true;
-        	            searchCount += 1;
         	        }
         	        
-        	        // Since we've found the word we were searching for, break this god-forsaken MapFile search loop
+        	        // Since we've found the word we were searching for, break the MapFile search loop
+        	        // in order to begin searching for the next label.
         	        break;
     	    	}
     	    	
