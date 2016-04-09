@@ -73,7 +73,6 @@ public class BooleanRetrievalJava extends Configured implements Tool {
         
 		for(Long docId: postings) {
 			if (docId > 0) {
-        		System.out.println("Retrieving doc ID: " + docId);
         	    String line = fetchLine(docId);
         	    String subLine = line.length() > 80 ? line.substring(0, 80) + "..." : line;
         	    System.out.println(docId + "\t" + subLine);
