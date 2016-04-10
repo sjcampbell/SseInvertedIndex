@@ -1,12 +1,54 @@
 package com.sjcampbell.spark.sse
 
+import org.apache.spark.rdd.RDD
+import org.apache.spark.SparkContext
+import org.apache.spark.SparkConf
 import org.scalatest.FunSuite
+import org.scalatest.BeforeAndAfter
 import org.apache.hadoop.io._
 import org.apache.hadoop.fs._
 import org.apache.hadoop.conf.Configuration
+import org.apache.log4j._
+import com.sjcampbell.spark.sse.utils.PairOfStringInt
+import tl.lin.data.array.LongArrayWritable
 
-class BuildInvertedIndexTest extends FunSuite {
+class BuildInvertedIndexTest extends FunSuite with BeforeAndAfter {
 
+    private val master = "local"
+    private val appName = "encrypted-index-testing"
+
+	private var sc: SparkContext = _
+	
+	private var testWordDocIds: Array[(String, LongWritable)] = _
+
+	val log = Logger.getLogger(getClass().getName())
+	
+	before {
+	    val conf = new SparkConf()
+    			.setMaster(master)
+    			.setAppName(appName)
+		conf.set("spark.serializer", "org.apache.spark.serializer.KryoSerializer")
+
+		sc = new SparkContext(conf)
+	    
+	    testWordDocIds =
+            Array(("w1", 1L), ("w1", 2L), ("w1", 3L), ("w1", 4L), 
+                ("w2", 5L), ("w2", 6L),
+                ("w3", 7L), ("w4", 8L),
+                ("w5", 9L))
+            .map {
+                case (word, l) => {
+                    (word, new LongWritable(l))
+                }
+            }
+    }
+    
+    after {
+        if (sc != null) {
+            sc.stop()
+        }
+    }
+    
     test("Personal scala test to compare two different Text objects") {
         val b1 = Array[Byte](1, 1, 1)
         val b2 = Array[Byte](2, 2, 2)
@@ -23,41 +65,64 @@ class BuildInvertedIndexTest extends FunSuite {
         assert(result2 == 0)
     }
     
-    /* These tests were written for the transformations, but no longer work since the transformations
-     * have been moved into anonymous functions due to the use of the document group size variable, since
-     * it has to be used within flatmap function. That led to a bunch of fallout, which eventually led to
-     * just putting all the transformation functions in the "main" function.
-     * 
+    test("reduceLongArrays should combine two LongArrayWritable arrays") {
+        val ar1 = Array[Long](0L, 1L, 2L)
+        val larw1 = new LongArrayWritable(ar1)
+        
+        val ar2 = Array[Long](3L, 4L, 5L)
+        val larw2 = new LongArrayWritable(ar2)
 
-    test("encryptWords should return document IDs split up by document group size") {
-        val indexBuilder = new EncryptedIndexBuilder(4)
-        val docIds = List(new LongWritable(1L), new LongWritable(2L), new LongWritable(3L), new LongWritable(4L), 
-                new LongWritable(5L), new LongWritable(6L), new LongWritable(7L), new LongWritable(8L))
-        val wordDocIds = ("test", docIds)
+        val result = InvertedIndexTransformations.reduceLongArrays(larw1, larw2)
         
-        println("Encrypting words")
-        val result = indexBuilder.encryptWords(wordDocIds)
+        assert(result.size() == 6)
         
-        assert(result.size == 2)
+        for (i <- 0 to result.size() - 1) {
+            assert(result.get(i) == i.toLong)
+        }
     }
     
-    test("encryptWords should group document IDs into defined group sizes.") {
-        val testGroupSize = 4
-        val indexBuilder = new EncryptedIndexBuilder(testGroupSize)
-        val docIds = List(new LongWritable(1L), new LongWritable(2L), new LongWritable(3L), new LongWritable(4L), 
-                new LongWritable(5L), new LongWritable(6L))
-        val wordDocIds = ("test", docIds)
+    test("encryptWords should group document IDs by the document group size") {
+        // Arrange
+        val groupedPostings = Array((("w1", 0), 1L), (("w1", 0), 2L), (("w1", 1), 3L), (("w1", 1), 4L), 
+                (("w2", 0), 5L), (("w2", 0), 6L),
+                (("w3", 0), 7L), (("w4", 0), 8L),
+                (("w5", 0), 9L))
+            // convert to other types
+            .map {
+                case (wordIndexPair, l) => {
+                    (new PairOfStringInt(wordIndexPair._1, wordIndexPair._2), new LongArrayWritable(Array[Long](l)))
+                }
+            }
         
-        val result = indexBuilder.encryptWords(wordDocIds)
+        val groupedPostingsRdd = sc.parallelize(groupedPostings, 1)
         
-        assert(result.size == 2)
+        // Act
+        val reducedPostingsRdd = groupedPostingsRdd.reduceByKey(InvertedIndexTransformations.reduceLongArrays)
+        val encryptedWordRdd = InvertedIndexTransformations.encryptGroupedPostings(reducedPostingsRdd, 2)
+        val result = encryptedWordRdd.collect()
+        
+        // Assert
+        var w1Count = 0        
+        result.foreach {
+            case (labelWordPair, docIds) => {
+                
+                println("LabelWord pair: " + labelWordPair)
+                println("Doc IDs: " + docIds.getArray().mkString(";"))
+                
+                if (labelWordPair.word == "w1") {
+                    assert(docIds.size() == 2)
+                    w1Count += 1
+                }
+                if (labelWordPair.word == "w2") assert(docIds.size() == 2)
+                if (labelWordPair.word == "w3") assert(docIds.get(0) == 7L)
+            }
+        }
+        
+        assert(w1Count == 2, "w1Count did not match expected group count")
+    }
 
-        println("Result: " + result)
-        
-        // The first iterator element is the last group prepended by the index builder, so it's the one with fewer elements.
-        assert(result(0)._2.size() == testGroupSize)
-        assert(result(1)._2.size() == testGroupSize)
-        result.iterator
+    /*test("Build index with distinct labels (disregard collisions for test dataset)") {
+       
     }*/
     
     /* This test shows that the token parser doesn't parse out words that are separated by only a comma with no spaces
