@@ -84,8 +84,7 @@ object BuildInvertedIndex extends Tokenizer{
                         count += 1
                         
                         val pl = Array[Long](docId.get())
-                        val postingsList = new LongArrayWritable(pl)
-                        (new PairOfStringInt(word, Math.floor((count - 1)/groupSize).toInt), postingsList)
+                        (new PairOfStringInt(word, Math.floor((count - 1)/groupSize).toInt), new LongArrayWritable(pl))
                     }
                 }
             }
@@ -96,7 +95,7 @@ object BuildInvertedIndex extends Tokenizer{
         
         var collisionCount = sc.accumulator(0)
         
-        // Sorting here allows us to find collisions, but also ensures history independence - a security property of the encrypted index algorithm.
+        // Sort to ensure history independence - a security property of the encrypted index algorithm.
         val collisions = encryptedWords.repartitionAndSortWithinPartitions(new InvertedIndexTransformations.WordPartitioner(args.reducers()))
         .mapPartitions { 
             case (iter) => {
@@ -122,6 +121,8 @@ object BuildInvertedIndex extends Tokenizer{
                 }
             }
         }
+        // Keys have to be in order to store as a MapFile
+        .sortByKey()
         .saveAsNewAPIHadoopFile(args.output(), classOf[Text], classOf[LongArrayWritable], classOf[MapFileOutputFormat])
         
         log.warn("! Collisions found in index: " + collisionCount.value)
