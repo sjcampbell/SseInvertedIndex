@@ -735,7 +735,8 @@
  \let\maketitle\relax
  \let\@maketitle\relax
  \gdef\@thanks{}\gdef\@author{}\gdef\@title{}\gdef\@subtitle{}\let\thanks\relax
- \@copyrightspace}
+ %SC: \@copyrightspace}
+ }
 
 %% CHANGES ON NEXT LINES
 \newif\if@ll % to record which version of LaTeX is in use
@@ -1026,24 +1027,25 @@
 %%% displacement to offset the space allocated for a non-existent
 %%% caption).
 %%%
-\newtoks\copyrightnotice
-\def\ftype@copyrightbox{8}
-\def\@copyrightspace{
-\@float{copyrightbox}[b]
-\begin{center}
-\setlength{\unitlength}{1pc}
-\ifnum\ACM@basesize=9
-\begin{picture}(20,6) %Space for copyright notice
-\put(0,-0.95){\crnotice{\@toappear}}
-\end{picture}
-\fi
-\ifnum\ACM@basesize=10
-\begin{picture}(20,7) %Space for copyright notice
-\put(0,-0.95){\crnotice{\@toappear}}
-\end{picture}
-\fi
-\end{center}
-\end@float}
+%%%% Commented out picture to gain back space, since there is no necessary copyright.
+%\newtoks\copyrightnotice
+%\def\ftype@copyrightbox{8}
+%\def\@copyrightspace{
+%\@float{copyrightbox}[b]
+%\begin{center}
+%\setlength{\unitlength}{1pc}
+%\ifnum\ACM@basesize=9
+%\begin{picture}(20,6) %Space for copyright notice
+%\put(0,-0.95){\crnotice{\@toappear}}
+%\end{picture}
+%\fi
+%\ifnum\ACM@basesize=10
+%\begin{picture}(20,7) %Space for copyright notice
+%\put(0,-0.95){\crnotice{\@toappear}}
+%\end{picture}
+%\fi
+%\end{center}
+%\end@float}
 
 \def\@toappear{} % Default setting blank - commands below change this.
 \long\def\toappear#1{\def\@toappear{\parbox[b]{20pc}{\baselineskip 9pt#1}}}
@@ -1629,10 +1631,11 @@
 \def\crdata#1{\global\acmcopyr{#1}}
 \def\permission#1{\global\boilerplate{#1}}
 
+%%%% SC: Commented out since ISBN is not necessary for project
 % ISBN
 %
-\def\isbn#1{\global\acmcopyr={#1}}
-\isbn{978-1-4503-2138-9}
+%\def\isbn#1{\global\acmcopyr={#1}}
+%\isbn{978-1-4503-2138-9}
 
 \RequirePackage{url}
 \urlstyle{rm}
@@ -1644,7 +1647,8 @@
 
 % Copyright
 \RequirePackage{acmcopyright}
-\setcopyright{none}
+%%%% SC: Commented out
+%\setcopyright{none}
 
 %
 \global\boilerplate={\@copyrightpermission}
